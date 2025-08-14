@@ -2,6 +2,12 @@ let mediaRecorder;
 let audioChunks = [];
 let audioContext;
 
+// Global state for audio queue and playback
+let audioQueue = [];
+let isPlaying = false;
+let audioSourceNodes = []; // Store active source nodes to stop them
+let currentReader; // To close the stream reader if we stop early
+
 // Helper function to update button states, text, and show a loading spinner
 function setButtonState(buttonId, text, isDisabled = false, showSpinner = false) {
     const button = document.getElementById(buttonId);
@@ -32,11 +38,6 @@ function displayMessage(message, type = 'info') {
     }
 }
 
-// Global state for audio queue
-let audioQueue = [];
-let isPlaying = false;
-let audioTimeout;
-
 async function handleFetch(url, options, loadingMessage, successMessage, errorMessage) {
     displayMessage(loadingMessage, 'info');
     try {
@@ -54,27 +55,60 @@ async function handleFetch(url, options, loadingMessage, successMessage, errorMe
     }
 }
 
-// --- The NEW and IMPROVED TTS playback logic ---
+// Function to stop all audio playback and clean up
+function stopAudioPlayback() {
+    // If a stream is currently being read, cancel it
+    if (currentReader) {
+        currentReader.cancel().catch(e => console.error("Error canceling reader:", e));
+        currentReader = null;
+    }
+    
+    // Stop all currently playing audio source nodes
+    audioSourceNodes.forEach(source => {
+        try {
+            source.stop();
+            source.disconnect();
+        } catch (e) {
+            // A node might have already finished playing, so we catch the error
+        }
+    });
+
+    // Reset state
+    audioSourceNodes = [];
+    audioQueue = [];
+    isPlaying = false;
+
+    // Reset button states
+    setButtonState("read", "🔊 Read Story");
+    setButtonState("record", "🎤 Record Voice");
+    setButtonState("generate", "📖 Generate Story");
+    displayMessage("Playback stopped.", 'info');
+}
+
 // This function plays chunks from the queue one by one
 function playNextChunk() {
-    if (audioQueue.length > 0) {
-        isPlaying = true;
+    if (audioQueue.length > 0 && isPlaying) {
         const chunk = audioQueue.shift();
         
-        // Create an AudioBufferSourceNode
         const source = audioContext.createBufferSource();
         source.buffer = chunk;
         source.connect(audioContext.destination);
 
-        // Start playing the chunk
+        // Add to our list of active sources
+        audioSourceNodes.push(source);
+
         source.start();
 
-        // After the chunk has played, play the next one
         source.onended = () => {
+            // Remove the source node from our list once it's done
+            const index = audioSourceNodes.indexOf(source);
+            if (index > -1) {
+                audioSourceNodes.splice(index, 1);
+            }
             playNextChunk();
         };
-    } else {
-        // Queue is empty, stop playing
+    } else if (audioQueue.length === 0 && !currentReader) {
+        // Playback finished and stream is closed
         isPlaying = false;
         setButtonState("read", "🔊 Read Story");
         setButtonState("record", "🎤 Record Voice");
@@ -83,27 +117,36 @@ function playNextChunk() {
     }
 }
 
+// ... (previous code remains the same)
+
 document.getElementById("read").onclick = async () => {
     const storyText = document.getElementById("story").value;
+
+    // If playback is currently active, stop it
+    if (isPlaying) {
+        stopAudioPlayback();
+        return;
+    }
+
     if (!storyText) {
         displayMessage("Please generate a story first!", 'error');
         return;
     }
     
-    setButtonState("read", "Reading...", true, true);
+    // Set the button to "Reading...", but make sure it's not disabled
+    // This allows the user to click it again to stop playback.
+    setButtonState("read", "⏹️ Stop Reading", false, true); 
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("generate", "📖 Generate Story", true);
     displayMessage("Fetching audio stream...", 'info');
+    
+    isPlaying = true;
 
     try {
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
         
-        // Reset the queue and playback state
-        audioQueue = [];
-        isPlaying = false;
-
         const res = await handleFetch("/tts_stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -111,17 +154,14 @@ document.getElementById("read").onclick = async () => {
         }, "Fetching audio stream...", "Playback started!", "Text-to-speech failed");
         
         if (res) {
-            const reader = res.body.getReader();
+            currentReader = res.body.getReader(); 
             let sourceSampleRate = null;
             let leftover = new Uint8Array(0);
 
             while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    // Start playback once all chunks are in the queue
-                    if (!isPlaying) {
-                        playNextChunk();
-                    }
+                const { done, value } = await currentReader.read();
+                if (!isPlaying || done) {
+                    if (done) currentReader = null;
                     break;
                 }
 
@@ -143,20 +183,18 @@ document.getElementById("read").onclick = async () => {
                         continue;
                     }
                 }
-
+                
                 const bytesAvailable = data.length - offset;
                 const alignedBytes = bytesAvailable - (bytesAvailable % 4);
                 if (alignedBytes > 0) {
                     const aligned = data.slice(offset, offset + alignedBytes);
                     const floatChunk = new Float32Array(aligned.buffer);
 
-                    // Create an audio buffer and add it to the queue
                     const audioBuffer = audioContext.createBuffer(1, floatChunk.length, sourceSampleRate);
                     audioBuffer.getChannelData(0).set(floatChunk);
                     audioQueue.push(audioBuffer);
 
-                    // If not currently playing, start the playback loop
-                    if (!isPlaying) {
+                    if (!audioSourceNodes.length) {
                         playNextChunk();
                     }
                 }
@@ -166,11 +204,11 @@ document.getElementById("read").onclick = async () => {
     } catch (error) {
         console.error("TTS playback error:", error);
         displayMessage("An error occurred during text-to-speech.", 'error');
-        setButtonState("read", "🔊 Read Story");
-        setButtonState("record", "🎤 Record Voice");
-        setButtonState("generate", "📖 Generate Story");
+        stopAudioPlayback();
     }
 };
+
+// ... (rest of the code remains the same)
 
 // --- Voice Recording and Transcription ---
 document.getElementById("record").onclick = async () => {
