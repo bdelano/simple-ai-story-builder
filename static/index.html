@@ -1,23 +1,46 @@
 <!DOCTYPE html>
-
 <html>
 <head>
     <title>Storytelling App</title>
     <style>
         body { font-family: sans-serif; padding: 20px; }
-        textarea { width: 100%; height: 150px; }
-        button { margin: 5px; }
+        textarea { width: 100%; height: 150px; margin-bottom: 10px; }
+        button { margin: 5px; padding: 10px 15px; display: inline-flex; align-items: center; justify-content: center; }
+        
+        /* Spinner styles */
+        .spinner {
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Status message styles */
+        #status-message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            display: none; /* Initially hide the message div */
+        }
+        #status-message.info { background-color: #e6f7ff; color: #00689b; display: block; }
+        #status-message.success { background-color: #dff0d8; color: #3c763d; display: block; }
+        #status-message.error { background-color: #f2dede; color: #a94442; display: block; }
     </style>
 </head>
 <body>
     <h1>Interactive Storytelling</h1>
     <button id="record">🎤 Record Voice</button>
-    <textarea id="prompt"></textarea><br>
+    <textarea id="prompt" placeholder="Speak or type your story prompt here..."></textarea><br>
     <button id="generate">📖 Generate Story</button>
     <button id="read">🔊 Read Story</button>
-    <textarea id="story"></textarea>
+    <textarea id="story" placeholder="Generated story will appear here..."></textarea>
+    
+    <div id="status-message">hold</div>
 
-    <script src="/static/story.js?v=1"></script>
+    <script src="/static/story.js?v=6"></script>
 </body>
 </html>
 
