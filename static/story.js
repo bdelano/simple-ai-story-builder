@@ -5,8 +5,9 @@ let audioContext;
 // Global state for audio queue and playback
 let audioQueue = [];
 let isPlaying = false;
-let audioSourceNodes = []; // Store active source nodes to stop them
-let currentReader; // To close the stream reader if we stop early
+let isPaused = false; // New state variable
+let audioSourceNodes = []; 
+let currentReader; 
 
 // Helper function to update button states, text, and show a loading spinner
 function setButtonState(buttonId, text, isDisabled = false, showSpinner = false) {
@@ -57,7 +58,6 @@ async function handleFetch(url, options, loadingMessage, successMessage, errorMe
 
 // Function to stop all audio playback and clean up
 function stopAudioPlayback() {
-    // If a stream is currently being read, cancel it
     if (currentReader) {
         currentReader.cancel().catch(e => console.error("Error canceling reader:", e));
         currentReader = null;
@@ -68,47 +68,61 @@ function stopAudioPlayback() {
         try {
             source.stop();
             source.disconnect();
-        } catch (e) {
-            // A node might have already finished playing, so we catch the error
-        }
+        } catch (e) {}
     });
 
-    // Reset state
     audioSourceNodes = [];
     audioQueue = [];
     isPlaying = false;
+    isPaused = false;
 
-    // Reset button states
     setButtonState("read", "🔊 Read Story");
     setButtonState("record", "🎤 Record Voice");
     setButtonState("generate", "📖 Generate Story");
     displayMessage("Playback stopped.", 'info');
 }
 
-// This function plays chunks from the queue one by one
+// Function to pause audio playback
+function pauseAudioPlayback() {
+    if (audioContext && audioContext.state === 'running') {
+        audioContext.suspend();
+        isPaused = true;
+        setButtonState("read", "▶️ Resume Reading");
+        displayMessage("Playback paused.", 'info');
+    }
+}
+
+// Function to resume audio playback
+function resumeAudioPlayback() {
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+        isPaused = false;
+        setButtonState("read", "⏸️ Pause Reading", false, true);
+        displayMessage("Playback resumed.", 'info');
+    }
+}
+
+
 function playNextChunk() {
-    if (audioQueue.length > 0 && isPlaying) {
+    if (audioQueue.length > 0 && isPlaying && !isPaused) {
         const chunk = audioQueue.shift();
         
         const source = audioContext.createBufferSource();
         source.buffer = chunk;
         source.connect(audioContext.destination);
 
-        // Add to our list of active sources
         audioSourceNodes.push(source);
 
         source.start();
 
         source.onended = () => {
-            // Remove the source node from our list once it's done
             const index = audioSourceNodes.indexOf(source);
             if (index > -1) {
                 audioSourceNodes.splice(index, 1);
             }
             playNextChunk();
         };
-    } else if (audioQueue.length === 0 && !currentReader) {
-        // Playback finished and stream is closed
+    } else if (audioQueue.length === 0 && !currentReader && !isPaused) {
         isPlaying = false;
         setButtonState("read", "🔊 Read Story");
         setButtonState("record", "🎤 Record Voice");
@@ -117,24 +131,27 @@ function playNextChunk() {
     }
 }
 
-// ... (previous code remains the same)
-
+// --- The NEW and IMPROVED read button logic ---
 document.getElementById("read").onclick = async () => {
-    const storyText = document.getElementById("story").value;
-
-    // If playback is currently active, stop it
-    if (isPlaying) {
-        stopAudioPlayback();
+    // Case 1: Audio is currently playing, so pause it
+    if (isPlaying && !isPaused) {
+        pauseAudioPlayback();
+        return;
+    }
+    
+    // Case 2: Audio is paused, so resume it
+    if (isPlaying && isPaused) {
+        resumeAudioPlayback();
         return;
     }
 
+    const storyText = document.getElementById("story").value;
     if (!storyText) {
         displayMessage("Please generate a story first!", 'error');
         return;
     }
     
-    // Set the button to "Reading...", but make sure it's not disabled
-    // This allows the user to click it again to stop playback.
+    // Case 3: Audio is not playing, so start a new playback session
     setButtonState("read", "⏹️ Stop Reading", false, true); 
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("generate", "📖 Generate Story", true);
@@ -163,6 +180,17 @@ document.getElementById("read").onclick = async () => {
                 if (!isPlaying || done) {
                     if (done) currentReader = null;
                     break;
+                }
+                if (isPaused) {
+                    // Pause the loop while the playback is paused
+                    await new Promise(resolve => {
+                        const checkPause = setInterval(() => {
+                            if (!isPaused) {
+                                clearInterval(checkPause);
+                                resolve();
+                            }
+                        }, 100);
+                    });
                 }
 
                 const data = new Uint8Array(leftover.length + value.length);
@@ -194,7 +222,7 @@ document.getElementById("read").onclick = async () => {
                     audioBuffer.getChannelData(0).set(floatChunk);
                     audioQueue.push(audioBuffer);
 
-                    if (!audioSourceNodes.length) {
+                    if (audioSourceNodes.length === 0 && !isPaused) {
                         playNextChunk();
                     }
                 }
