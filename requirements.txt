@@ -1,0 +1,6 @@
+httpx==0.28.1
+kokoro-onnx==0.4.9
+openai-whisper==20250625
+Quart==0.20.0
+soundfile==0.13.1
+
