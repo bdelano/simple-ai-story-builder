@@ -1,5 +1,7 @@
 # simple-ai-story-builder
-In order to do some testing with GPT5.0, I decided to tie a few ai technologies together into a very simple story builder app.  These scripts are intended for local use and rely on your computer being able to run basic lightweight LLM and other Text-To-Speech (TTS) and Speech-To-Text (STT) models.  FWIW this built using an M1 macbook, so your mileage may vary.
+In order to do some testing with GPT5.0, I decided to tie a few ai technologies together into a very simple story builder app.  These scripts are intended for local use and rely on your computer being able to run basic lightweight LLM and other Text-To-Speech (TTS) and Speech-To-Text (STT) models.  FWIW this built using an M1 macbook, so your mileage may vary.  
+
+A few words on GPT5.0, overall it was *not* a great experience.  Having never 'vibe' coded before, I was expecting it to at least keep track of the project but it consistently spit out semi working pieces of code which I had to piece together myself to get something only partially working.  Eventually, I decided to try Gemini (Google), which I had heard was overall a better coding experience.  I found this to be 100% true.. After feeding it the three main files in this project, it immediately was able to clean up several errors.  It was then able to add additional features without screwing up any of the previous code.  Short your openai stock, I think Google will win this.
 
 ## Details
 
