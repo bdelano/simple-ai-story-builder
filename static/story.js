@@ -5,10 +5,12 @@ let audioContext;
 // Global state for audio queue and playback
 let audioQueue = [];
 let isPlaying = false;
-let isPaused = false; // New state variable
+let isPaused = false; 
 let audioSourceNodes = []; 
-let currentReader; 
+let currentReader;
 
+// Client-side message history for chat endpoint
+let messageHistory = [];
 // Helper function to update button states, text, and show a loading spinner
 function setButtonState(buttonId, text, isDisabled = false, showSpinner = false) {
     const button = document.getElementById(buttonId);
@@ -303,15 +305,34 @@ document.getElementById("record").onclick = async () => {
     }
 };
 
-// --- Story Generation ---
+// --- New function to update the chat history UI ---
+function updateChatHistoryUI() {
+    const chatHistoryDiv = document.getElementById("chat-history");
+    chatHistoryDiv.innerHTML = ""; // Clear existing content
+
+    messageHistory.forEach(msg => {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `chat-message ${msg.role}-message`;
+        messageDiv.textContent = msg.content;
+        chatHistoryDiv.appendChild(messageDiv);
+    });
+
+    // Scroll to the bottom of the chat history
+    chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+}
+
+// --- The new Story Generation logic using chat endpoint ---
 document.getElementById("generate").onclick = async () => {
     const prompt = document.getElementById("prompt").value;
     if (!prompt) {
         displayMessage("Please enter a prompt first!", 'error');
         return;
     }
+    
+    messageHistory.push({ role: "user", content: prompt });
+    document.getElementById("prompt").value = ""; // Clear prompt input
+    updateChatHistoryUI(); // Update chat window
 
-    // **Visual Feedback:** Change button to "Generating..." with a spinner
     setButtonState("generate", "Generating...", true, true);
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("read", "🔊 Read Story", true);
@@ -320,22 +341,43 @@ document.getElementById("generate").onclick = async () => {
     const res = await handleFetch("/story", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
-    }, "Generating story...", "Story generated!", "Story generation failed");
+        body: JSON.stringify({ messages: messageHistory }) 
+    }, "Generating story...", "Story generation successful!", "Story generation failed");
 
     if (res) {
         const reader = res.body.getReader();
-        let text = "";
+        let fullResponse = ""; 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            text += new TextDecoder().decode(value);
-            document.getElementById("story").value = text;
+            const chunk = new TextDecoder().decode(value);
+            fullResponse += chunk;
+            document.getElementById("story").value += chunk;
         }
+        messageHistory.push({ role: "assistant", content: fullResponse });
+        updateChatHistoryUI(); // Update chat window
     }
 
-    // **Visual Feedback:** Reset buttons
     setButtonState("generate", "📖 Generate Story");
     setButtonState("record", "🎤 Record Voice");
     setButtonState("read", "🔊 Read Story");
 };
+
+// --- UI Event Handlers ---
+document.addEventListener("DOMContentLoaded", () => {
+    const historyBtn = document.getElementById("history-toggle-btn");
+    const closeBtn = document.getElementById("close-chat-btn");
+    const chatContainer = document.getElementById("chat-history-container");
+    
+    historyBtn.addEventListener("click", () => {
+        chatContainer.classList.add("visible");
+        historyBtn.style.display = "none";
+        // Call update UI to make sure the chat history is up to date
+        updateChatHistoryUI();
+    });
+    
+    closeBtn.addEventListener("click", () => {
+        chatContainer.classList.remove("visible");
+        historyBtn.style.display = "flex";
+    });
+});
