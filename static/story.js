@@ -437,7 +437,6 @@ document.getElementById("save-story").onclick = async () => {
 
 // --- Load Story Logic (Modal and Button) ---
 const loadModal = document.getElementById("load-modal");
-const closeModal = document.querySelector(".close-modal");
 
 // --- Load Story Logic ---
 const storyListContainer = document.getElementById("story-list-container");
@@ -475,10 +474,6 @@ loadBtn.onclick = async () => {
         }
         storyListContainer.style.display = "block";
     }
-};
-
-closeModal.onclick = () => {
-    loadModal.style.display = "none";
 };
 
 window.onclick = (event) => {
