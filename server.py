@@ -6,7 +6,7 @@ import struct
 import json
 import httpx
 import soundfile as sf
-import os  # Import the os module for file deletion
+import os
 
 from quart import Quart, request, Response, send_from_directory, jsonify
 from kokoro_onnx import Kokoro
@@ -41,10 +41,11 @@ async def transcribe_audio():
     if stt_model is None:
         return jsonify({"error": "Speech-to-text service is not available."}), 503
 
-    if "audio" not in request.files:
+    files = await request.files
+    if "audio" not in files:
         return jsonify({"error": "No audio file provided."}), 400
 
-    audio_file = (await request.files)["audio"]
+    audio_file = files["audio"]
 
     # Use a try...finally block to ensure the temporary file is deleted
     tmp_path = None
@@ -68,29 +69,30 @@ async def transcribe_audio():
 async def generate_story():
     try:
         payload = await request.get_json()
-        prompt = (payload or {}).get("prompt", "")
-        if not prompt:
-            return jsonify({"error": "Prompt cannot be empty."}), 400
+        messages = (payload or {}).get("messages", [])
+        if not messages:
+            return jsonify({"error": "Message history cannot be empty."}), 400
 
         async def generate():
             async with httpx.AsyncClient() as client:
                 try:
+                    # Use the Ollama /api/chat endpoint
                     async with client.stream(
-                        "POST", OLLAMA_URL,
-                        json={"model": LLM_MODEL,"messages": [{"role":"user","content": prompt}], "stream": True}
+                        "POST", OLLAMA_URL.replace("generate", "chat"),
+                        json={"model": LLM_MODEL, "messages": messages, "stream": True}
                     ) as resp:
-                        resp.raise_for_status() # Raise an exception for bad status codes
+                        resp.raise_for_status()
                         async for line in resp.aiter_lines():
                             if not line.strip():
                                 continue
                             try:
                                 data = json.loads(line)
-                                if "content" in data['message']:
-                                    yield data['message']["content"]
-                            except json.JSONDecodeError:
+                                if "content" in data["message"]:
+                                    yield data["message"]["content"]
+                            except (json.JSONDecodeError, KeyError) as e:
                                 continue
                 except httpx.HTTPError as e:
-                    print(f"Ollama stream error: {e}")
+                    print(f"Ollama chat stream error: {e}")
                     yield f"An error occurred with the LLM service: {e}"
 
         return Response(generate(), content_type="text/plain")
