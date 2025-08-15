@@ -1,3 +1,29 @@
+// --- Initialization: Clear all text fields on page load ---
+document.addEventListener("DOMContentLoaded", () => {
+    // Clear all the text areas and input fields
+    document.getElementById("prompt").value = "";
+    document.getElementById("generated-story-output").value = "";
+    document.getElementById("my-story").value = "";
+    document.getElementById("story-title").value = "";
+    
+    // UI toggle logic
+    const historyBtn = document.getElementById("history-toggle-btn");
+    const closeBtn = document.getElementById("close-chat-btn");
+    const chatContainer = document.getElementById("chat-history-container");
+    
+    historyBtn.addEventListener("click", () => {
+        chatContainer.classList.add("visible");
+        historyBtn.style.display = "none";
+        updateChatHistoryUI();
+    });
+    
+    closeBtn.addEventListener("click", () => {
+        chatContainer.classList.remove("visible");
+        historyBtn.style.display = "flex";
+    });
+});
+
+
 let mediaRecorder;
 let audioChunks = [];
 let audioContext;
@@ -238,7 +264,32 @@ document.getElementById("read").onclick = async () => {
     }
 };
 
-// ... (rest of the code remains the same)
+// Add a function to stop and reset the audio playback state
+function stopAudioPlayback() {
+    isPlaying = false;
+    isPaused = false;
+    
+    // Stop and clear the queue of audio sources
+    audioQueue = []; 
+    audioSourceNodes.forEach(source => {
+        try {
+            source.stop();
+        } catch (e) {
+            // Ignore errors if the source is already stopped
+        }
+    });
+    audioSourceNodes = []; 
+    
+    // If a stream is in progress, cancel it
+    if (currentReader) {
+        currentReader.cancel("Playback stopped.");
+        currentReader = null;
+    }
+
+    setButtonState("read", "🔊 Read Story");
+    displayMessage("Audio playback stopped.", "info");
+}
+
 
 // --- Voice Recording and Transcription ---
 document.getElementById("record").onclick = async () => {
@@ -483,6 +534,9 @@ window.onclick = (event) => {
 };
 
 async function loadSelectedStory(filename) {
+    // Stop any current audio playback before loading a new story
+    stopAudioPlayback();
+
     const res = await handleFetch(`/load_story/${filename}`, { method: "GET" }, "Loading story...", "Story loaded successfully!", "Failed to load story");
     
     if (res) {
