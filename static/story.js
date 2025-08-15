@@ -382,7 +382,7 @@ document.getElementById("copy-story").onclick = () => {
     }
 };
 
-// --- UI Event Handlers ---
+// --- UI Event Handlers (modal-related code removed) ---
 document.addEventListener("DOMContentLoaded", () => {
     const historyBtn = document.getElementById("history-toggle-btn");
     const closeBtn = document.getElementById("close-chat-btn");
@@ -391,7 +391,6 @@ document.addEventListener("DOMContentLoaded", () => {
     historyBtn.addEventListener("click", () => {
         chatContainer.classList.add("visible");
         historyBtn.style.display = "none";
-        // Call update UI to make sure the chat history is up to date
         updateChatHistoryUI();
     });
     
@@ -400,3 +399,111 @@ document.addEventListener("DOMContentLoaded", () => {
         historyBtn.style.display = "flex";
     });
 });
+
+// --- Save Story Logic ---
+document.getElementById("save-story").onclick = async () => {
+    const storyTitle = document.getElementById("story-title").value.trim();
+    const storyText = document.getElementById("my-story").value;
+
+    if (!storyTitle) {
+        displayMessage("Please enter a title for your story before saving.", 'error');
+        return;
+    }
+    
+    if (!storyText) {
+        displayMessage("There is no story content to save.", 'error');
+        return;
+    }
+
+    const payload = {
+        title: storyTitle,
+        messages: messageHistory,
+        story_text: storyText
+    };
+
+    const res = await handleFetch("/save_story", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    }, "Saving story...", "Story saved!", "Failed to save story");
+
+    if (res) {
+        const data = await res.json();
+        console.log("Saved story:", data.filename);
+        // We can now show the user the title of the saved story
+        displayMessage(`'${storyTitle}' saved successfully!`, 'success');
+    }
+};
+
+// --- Load Story Logic (Modal and Button) ---
+const loadModal = document.getElementById("load-modal");
+const closeModal = document.querySelector(".close-modal");
+
+// --- Load Story Logic ---
+const storyListContainer = document.getElementById("story-list-container");
+const storyListDiv = document.getElementById("story-list");
+const loadBtn = document.getElementById("load-story");
+
+loadBtn.onclick = async () => {
+    if (storyListContainer.style.display === "block") {
+        storyListContainer.style.display = "none";
+        displayMessage("Story list hidden.", "info");
+        return;
+    }
+    
+    const res = await handleFetch("/list_stories", { method: "GET" }, "Fetching stories...", "Stories loaded.", "Failed to load stories.");
+    
+    if (res) {
+        const data = await res.json();
+        storyListDiv.innerHTML = "";
+        
+        if (data.stories && data.stories.length > 0) {
+            data.stories.forEach(story => {
+                const item = document.createElement("button");
+                item.className = "story-list-item";
+                item.textContent = story.title;
+                item.onclick = async () => {
+                    await loadSelectedStory(story.filename);
+                    storyListContainer.style.display = "none";
+                };
+                storyListDiv.appendChild(item);
+            });
+            displayMessage("Select a story to load.", "info");
+        } else {
+            storyListDiv.textContent = "No stories found.";
+            displayMessage("No stories found.", "info");
+        }
+        storyListContainer.style.display = "block";
+    }
+};
+
+closeModal.onclick = () => {
+    loadModal.style.display = "none";
+};
+
+window.onclick = (event) => {
+    if (event.target == loadModal) {
+        loadModal.style.display = "none";
+    }
+};
+
+async function loadSelectedStory(filename) {
+    const res = await handleFetch(`/load_story/${filename}`, { method: "GET" }, "Loading story...", "Story loaded successfully!", "Failed to load story");
+    
+    if (res) {
+        const data = await res.json();
+        
+        // Clear existing content
+        messageHistory.length = 0; 
+        document.getElementById("generated-story-output").value = "";
+        
+        // Populate with loaded data
+        document.getElementById("story-title").value = data.title || "";
+        messageHistory = data.chat_history || [];
+        document.getElementById("my-story").value = data.story || "";
+        
+        // Update the UI
+        updateChatHistoryUI();
+        displayMessage(`'${data.title || 'Untitled'}' loaded.`, 'success');
+    }
+}

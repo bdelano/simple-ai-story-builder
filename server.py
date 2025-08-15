@@ -1,12 +1,10 @@
-import io
 import numpy as np
-import asyncio
 import tempfile
-import struct
 import json
 import httpx
-import soundfile as sf
 import os
+import re
+from datetime import datetime
 
 from quart import Quart, request, Response, send_from_directory, jsonify
 from kokoro_onnx import Kokoro
@@ -30,6 +28,11 @@ try:
 except Exception as e:
     print(f"Error loading Kokoro model: {e}")
     kokoro = None
+
+# Ensure the 'stories' directory exists
+STORIES_DIR = "stories"
+if not os.path.exists(STORIES_DIR):
+    os.makedirs(STORIES_DIR)
 
 @app.route("/")
 async def index():
@@ -132,6 +135,92 @@ async def tts_stream():
     except Exception as e:
         print(f"TTS stream error: {e}")
         return jsonify({"error": "An error occurred during TTS streaming."}), 500
+
+def sanitize_filename(title):
+    """Sanitizes a string to be used as a filename."""
+    # Replace spaces with underscores and remove non-alphanumeric characters
+    sanitized = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+    # Limit to first 30 characters to avoid very long filenames
+    return sanitized[:30].strip('_')
+
+
+@app.route("/save_story", methods=["POST"])
+async def save_story():
+    """Saves the chat history and story to a JSON file."""
+    try:
+        payload = await request.get_json()
+        title = payload.get("title", "Untitled").strip()
+        messages = payload.get("messages", [])
+        story_text = payload.get("story_text", "")
+        
+        if not title or not story_text:
+            return jsonify({"error": "Title and story content are required."}), 400
+
+        # Create a sanitized filename from the title and a timestamp
+        sanitized_title = sanitize_filename(title)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"{sanitized_title}_{timestamp}.json"
+        filepath = os.path.join(STORIES_DIR, filename)
+
+        data_to_save = {
+            "title": title,
+            "timestamp": timestamp,
+            "chat_history": messages,
+            "story": story_text
+        }
+
+        with open(filepath, "w") as f:
+            json.dump(data_to_save, f, indent=4)
+        
+        return jsonify({"message": "Story saved successfully!", "filename": filename})
+
+    except Exception as e:
+        print(f"Error saving story: {e}")
+        return jsonify({"error": "An internal server error occurred while saving."}), 500
+
+
+@app.route("/load_story/<filename>", methods=["GET"])
+async def load_story(filename):
+    """Loads a story from a JSON file."""
+    filepath = os.path.join(STORIES_DIR, filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Story not found."}), 404
+    
+    try:
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        print(f"Error loading story: {e}")
+        return jsonify({"error": "An error occurred while loading the story."}), 500
+
+
+@app.route("/list_stories", methods=["GET"])
+async def list_stories():
+    """Lists all available story files and their titles."""
+    try:
+        files_with_titles = []
+        for filename in os.listdir(STORIES_DIR):
+            if filename.endswith(".json"):
+                filepath = os.path.join(STORIES_DIR, filename)
+                try:
+                    with open(filepath, "r") as f:
+                        data = json.load(f)
+                        files_with_titles.append({
+                            "filename": filename,
+                            "title": data.get("title", os.path.splitext(filename)[0]),
+                            "timestamp": data.get("timestamp", "")
+                        })
+                except (json.JSONDecodeError, FileNotFoundError):
+                    continue
+        
+        # Sort by timestamp, newest first
+        files_with_titles.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        return jsonify({"stories": files_with_titles})
+    except Exception as e:
+        print(f"Error listing stories: {e}")
+        return jsonify({"error": "An error occurred while listing stories."}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
