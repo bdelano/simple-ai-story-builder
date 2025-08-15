@@ -88,7 +88,7 @@ async def generate_story():
                             try:
                                 data = json.loads(line)
                                 if "content" in data["message"]:
-                                    yield data["message"]["content"]
+                                    yield data["message"]["content"].replace('*','')
                             except (json.JSONDecodeError, KeyError) as e:
                                 continue
                 except httpx.HTTPError as e:

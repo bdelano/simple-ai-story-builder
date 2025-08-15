@@ -147,7 +147,7 @@ document.getElementById("read").onclick = async () => {
         return;
     }
 
-    const storyText = document.getElementById("story").value;
+    const storyText = document.getElementById("my-story").value;
     if (!storyText) {
         displayMessage("Please generate a story first!", 'error');
         return;
@@ -321,8 +321,9 @@ function updateChatHistoryUI() {
     chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
 }
 
-// --- The new Story Generation logic using chat endpoint ---
+// --- Story Generation ---
 document.getElementById("generate").onclick = async () => {
+    // ... (rest of the generate function is unchanged, it will still output to `generated-story-output`) ...
     const prompt = document.getElementById("prompt").value;
     if (!prompt) {
         displayMessage("Please enter a prompt first!", 'error');
@@ -330,13 +331,13 @@ document.getElementById("generate").onclick = async () => {
     }
     
     messageHistory.push({ role: "user", content: prompt });
-    document.getElementById("prompt").value = ""; // Clear prompt input
-    updateChatHistoryUI(); // Update chat window
+    document.getElementById("prompt").value = "";
+    updateChatHistoryUI();
 
     setButtonState("generate", "Generating...", true, true);
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("read", "🔊 Read Story", true);
-    document.getElementById("story").value = "";
+    document.getElementById("generated-story-output").value = "";
 
     const res = await handleFetch("/story", {
         method: "POST",
@@ -352,15 +353,33 @@ document.getElementById("generate").onclick = async () => {
             if (done) break;
             const chunk = new TextDecoder().decode(value);
             fullResponse += chunk;
-            document.getElementById("story").value += chunk;
+            document.getElementById("generated-story-output").value += chunk;
         }
         messageHistory.push({ role: "assistant", content: fullResponse });
-        updateChatHistoryUI(); // Update chat window
+        updateChatHistoryUI();
     }
 
     setButtonState("generate", "📖 Generate Story");
     setButtonState("record", "🎤 Record Voice");
     setButtonState("read", "🔊 Read Story");
+};
+
+// --- New Copy Story Logic ---
+document.getElementById("copy-story").onclick = () => {
+    const generatedText = document.getElementById("generated-story-output").value;
+    const myStoryTextarea = document.getElementById("my-story");
+
+    if (generatedText) {
+        // Append the generated text with a newline for separation
+        const currentContent = myStoryTextarea.value;
+        myStoryTextarea.value = currentContent + "\n\n" + generatedText;
+        displayMessage("Generated story added to 'My Story'!", 'success');
+        
+        // Clear the generated output box after copying
+        document.getElementById("generated-story-output").value = "";
+    } else {
+        displayMessage("No generated story to add.", 'info');
+    }
 };
 
 // --- UI Event Handlers ---
