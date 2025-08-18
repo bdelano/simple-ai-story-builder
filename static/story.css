@@ -1,0 +1,314 @@
+/* General body and container styling */
+body {
+    font-family: sans-serif;
+    padding: 20px;
+    background-color: #f0f2f5;
+}
+
+.main-container {
+    width: 90%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.main-container {
+    margin-top: 5px;
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+}
+
+.textarea-group {
+    margin-bottom: 10px;
+}
+
+textarea {
+    width: 100%;
+    height: 150px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+/* New class for the smaller prompt textbox */
+.prompt-box {
+    height: 75px;
+}
+
+/* Make 'My Story' textbox much larger */
+#my-story {
+    height: 600px;
+    max-height: 600px;
+}
+
+.button-group {
+    text-align: center;
+    margin-bottom: 5px;
+}
+
+button {
+    margin: 5px;
+    padding: 8px 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    border-radius: 4px;
+    transition: background-color 0.3s ease;
+}
+
+#record {
+    background-color: #ff5722;
+    color: white;
+}
+
+#record:hover {
+    background-color: #e64a19;
+}
+
+#generate {
+    background-color: #00796b;
+    color: white;
+}
+
+#generate:hover {
+    background-color: #00695c;
+}
+
+#read {
+    background-color: #2196f3;
+    color: white;
+}
+
+#read:hover {
+    background-color: #1e88e5;
+}
+
+/* New button for copying story */
+#copy-story {
+    background-color: #607d8b;
+    color: white;
+    margin-top: 5px;
+}
+
+#copy-story:hover {
+    background-color: #455a64;
+}
+
+/* New styles for save/load buttons */
+#save-story {
+    background-color: #4CAF50;
+    color: white;
+}
+
+#save-story:hover {
+    background-color: #45a049;
+}
+
+#load-story {
+    background-color: #795548;
+    color: white;
+}
+
+#load-story:hover {
+    background-color: #5d4037;
+}
+
+
+
+
+
+/* Pop-out chat history styles */
+#chat-history-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 350px;
+    height: 450px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+    transform: scale(0.8) translateY(-20px);
+    opacity: 0;
+    visibility: hidden;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#chat-history-container.visible {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+    visibility: visible;
+}
+
+.chat-header {
+    padding: 10px;
+    background-color: #2196f3;
+    color: white;
+    font-weight: bold;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#close-chat-btn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+#chat-history {
+    flex-grow: 1;
+    padding: 15px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.chat-message {
+    max-width: 80%;
+    padding: 10px;
+    border-radius: 18px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.user-message {
+    background-color: #e6f7ff;
+    align-self: flex-end;
+    border-bottom-right-radius: 2px;
+}
+
+.assistant-message {
+    background-color: #f0f2f5;
+    align-self: flex-start;
+    border-bottom-left-radius: 2px;
+}
+
+/* Pop-out button styles */
+#history-toggle-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background-color: #2196f3;
+    color: white;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    z-index: 1001;
+    cursor: pointer;
+}
+
+/* Status message styles */
+#status-message {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 10px;
+    font-weight: bold;
+    text-align: center;
+    z-index: 1000;
+}
+
+/* Add a top margin to the main container to prevent content from being hidden */
+
+
+#status-message.info {
+    background-color: #e6f7ff;
+    color: #00689b;
+    display: block;
+}
+
+#status-message.success {
+    background-color: #dff0d8;
+    color: #3c763d;
+    display: block;
+}
+
+#status-message.error {
+    background-color: #f2dede;
+    color: #a94442;
+    display: block;
+}
+
+/* Add styling for the new title input */
+.title-input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    box-sizing: border-box;
+}
+
+/* New container styles for cleaner grouping */
+.editor-container {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 10px;
+}
+
+/* Minimize button text for a cleaner look */
+.story-controls .button-group button {
+    padding: 8px 12px;
+    font-size: 14px;
+}
+
+/* New styles for the story list container */
+#story-list-container {
+    display: none;
+    margin-bottom: 10px;
+}
+
+#story-list {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    background-color: #fff;
+    padding: 10px;
+}
+
+.story-list-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px;
+    margin-bottom: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.story-list-item:hover {
+    background-color: #e9e9e9;
+}
+
+/* ... (rest of the CSS remains the same) ... */
