@@ -1,5 +1,5 @@
 KOKORO_MODEL = "kokoro-v1.0.onnx"
 KOKORO_VOICES = "voices-v1.0.bin"
 OLLAMA_URL = "http://localhost:11434/api/chat"
-LLM_MODEL = "huggingface.co/QuantFactory/gemma-2-Ifable-9B-GGUF"
+LLM_MODEL = "dmueQ6"
 VOICE = "af_heart"

@@ -1,17 +1,30 @@
 import numpy as np
 import tempfile
+import logging
+import ffmpeg
+import uuid
 import json
 import httpx
 import os
 import re
 from datetime import datetime
-
+import asyncio
 from quart import Quart, request, Response, send_from_directory, jsonify
 from kokoro_onnx import Kokoro
 from config import KOKORO_MODEL, KOKORO_VOICES, OLLAMA_URL, LLM_MODEL, VOICE
 
 # Import whisper only once
 import whisper
+
+# A simple in-memory cache for ongoing story generation jobs
+story_jobs = {}
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)-8s %(message)s',
+    #filename="logger.log",
+    level=logging.DEBUG,
+    datefmt='%Y-%m-%d %H:%M:%S')
+
+logger=logging.getLogger('server')
 
 # Load Whisper model once when the application starts
 try:
@@ -33,10 +46,6 @@ except Exception as e:
 STORIES_DIR = "stories"
 if not os.path.exists(STORIES_DIR):
     os.makedirs(STORIES_DIR)
-
-@app.route("/")
-async def index():
-    return await send_from_directory("static", "index.html")
 
 @app.route("/stt", methods=["POST"])
 async def transcribe_audio():
@@ -62,53 +71,89 @@ async def transcribe_audio():
         text = result.get("text", "")
         return jsonify({"text": text})
     except Exception as e:
-        print(f"Error during transcription: {e}")
+        logger.warning(f"Error during transcription: {e}")
         return jsonify({"error": "An error occurred during transcription."}), 500
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path) # Clean up the temporary file
 
-@app.post("/story")
-async def generate_story():
+@app.route("/")
+async def index():
+    return await app.send_static_file("index.html")
+
+@app.route("/static/<path:path>")
+async def serve_static(path):
+    return await app.send_static_file(f"static/{path}")
+
+# New endpoint to START the generation process
+@app.post("/start_story_generation")
+async def start_story_generation():
+    payload = await request.get_json()
+    messages = (payload or {}).get("messages", [])
+    if not messages:
+        return jsonify({"error": "Message history cannot be empty."}), 400
+
+    job_id = str(uuid.uuid4())
+    story_jobs[job_id] = {
+        "text": "",
+        "status": "in_progress",
+    }
+    
+    # Run the generation in the background
+    asyncio.create_task(generate_in_background(job_id, messages))
+    
+    return jsonify({"job_id": job_id})
+
+# A separate async function to handle the long-running task
+async def generate_in_background(job_id, messages):
     try:
-        payload = await request.get_json()
-        messages = (payload or {}).get("messages", [])
-        if not messages:
-            return jsonify({"error": "Message history cannot be empty."}), 400
-
-        async def generate():
-            async with httpx.AsyncClient() as client:
-                try:
-                    # Use the Ollama /api/chat endpoint
-                    async with client.stream(
-                        "POST", OLLAMA_URL.replace("generate", "chat"),
-                        json={"model": LLM_MODEL, "messages": messages, "stream": True}
-                    ) as resp:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if not line.strip():
-                                continue
-                            try:
-                                data = json.loads(line)
-                                if "content" in data["message"]:
-                                    yield data["message"]["content"].replace('*','')
-                            except (json.JSONDecodeError, KeyError) as e:
-                                continue
-                except httpx.HTTPError as e:
-                    print(f"Ollama chat stream error: {e}")
-                    yield f"An error occurred with the LLM service: {e}"
-
-        return Response(generate(), content_type="text/plain")
+        timeout_config = httpx.Timeout(600.0, connect=60.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            async with client.stream(
+                "POST", OLLAMA_URL,
+                json={"model": LLM_MODEL, "messages": messages, "stream": True}
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            if "content" in data["message"]:
+                                content_chunk = data["message"]["content"].replace('*', '')
+                                # Append the new chunk to the job's text
+                                story_jobs[job_id]["text"] += content_chunk
+                        except (json.JSONDecodeError, KeyError):
+                            continue
     except Exception as e:
-        print(f"Story generation error: {e}")
-        return jsonify({"error": "An internal server error occurred."}), 500
+        print(f"Background generation failed for job {job_id}: {e}")
+        story_jobs[job_id]["status"] = "error"
+    finally:
+        story_jobs[job_id]["status"] = "complete"
 
+# New endpoint for the client to poll for updates
+@app.get("/get_story_chunk/<job_id>")
+async def get_story_chunk(job_id):
+    job = story_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found."}), 404
+
+    current_text = job["text"]
+    status = job["status"]
+    
+    # Clean up completed jobs to prevent memory leaks
+    if status == "complete":
+        del story_jobs[job_id]
+
+    return jsonify({
+        "text": current_text,
+        "status": status,
+    })
 
 @app.post("/tts_stream")
 async def tts_stream():
     """
     Async low-latency TTS using kokoro-onnx.
-    Streams raw little-endian float32 PCM. First bytes contain "SR:<rate>\\n".
+    Buffers the entire audio file before streaming to prevent client-side errors.
     """
     if kokoro is None:
         return jsonify({"error": "Text-to-speech service is not available."}), 503
@@ -121,17 +166,21 @@ async def tts_stream():
         if not text:
             return jsonify({"error": "Text cannot be empty."}), 400
 
-        async def pcm_stream():
-            first = True
-            async for samples, sr in kokoro.create_stream(text, voice=voice):
-                chunk = np.asarray(samples, dtype=np.float32).tobytes()
-                if first:
-                    yield b"SR:" + str(sr).encode("ascii") + b"\n" + chunk
-                    first = False
-                else:
-                    yield chunk
+        # --- New implementation to buffer the full audio stream ---
+        full_audio_data = b""
+        async for samples, sr in kokoro.create_stream(text, voice=voice):
+            chunk = np.asarray(samples, dtype=np.float32).tobytes()
+            # Store the sample rate from the first chunk
+            if not full_audio_data:
+                full_audio_data += b"SR:" + str(sr).encode("ascii") + b"\n"
+            full_audio_data += chunk
 
-        return Response(pcm_stream(), content_type="application/octet-stream")
+        async def buffered_stream():
+            # Now, stream the complete audio data to the client
+            # This is a robust and reliable way to deliver the file
+            yield full_audio_data
+
+        return Response(buffered_stream(), content_type="application/octet-stream")
     except Exception as e:
         print(f"TTS stream error: {e}")
         return jsonify({"error": "An error occurred during TTS streaming."}), 500

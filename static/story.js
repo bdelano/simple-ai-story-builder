@@ -373,14 +373,14 @@ function updateChatHistoryUI() {
 }
 
 // --- Story Generation ---
+// Story Generation - The NEW polling approach
 document.getElementById("generate").onclick = async () => {
-    // ... (rest of the generate function is unchanged, it will still output to `generated-story-output`) ...
     const prompt = document.getElementById("prompt").value;
     if (!prompt) {
         displayMessage("Please enter a prompt first!", 'error');
         return;
     }
-    
+
     messageHistory.push({ role: "user", content: prompt });
     document.getElementById("prompt").value = "";
     updateChatHistoryUI();
@@ -390,29 +390,73 @@ document.getElementById("generate").onclick = async () => {
     setButtonState("read", "🔊 Read Story", true);
     document.getElementById("generated-story-output").value = "";
 
-    const res = await handleFetch("/story", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messageHistory }) 
-    }, "Generating story...", "Story generation successful!", "Story generation failed");
-
-    if (res) {
-        const reader = res.body.getReader();
-        let fullResponse = ""; 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = new TextDecoder().decode(value);
-            fullResponse += chunk;
-            document.getElementById("generated-story-output").value += chunk;
-        }
-        messageHistory.push({ role: "assistant", content: fullResponse });
-        updateChatHistoryUI();
+    displayMessage("Starting story generation...", 'info');
+    
+    let job_id;
+    try {
+        const startRes = await fetch("/start_story_generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messages: messageHistory })
+        });
+        const startData = await startRes.json();
+        job_id = startData.job_id;
+        if (!job_id) throw new Error("Could not get job ID.");
+        displayMessage("Generation started. Polling for updates...", 'info');
+    } catch (error) {
+        displayMessage("Failed to start story generation.", 'error');
+        setButtonState("generate", "📖 Generate Story");
+        setButtonState("record", "🎤 Record Voice");
+        setButtonState("read", "🔊 Read Story");
+        return;
     }
 
-    setButtonState("generate", "📖 Generate Story");
-    setButtonState("record", "🎤 Record Voice");
-    setButtonState("read", "🔊 Read Story");
+    let lastKnownLength = 0;
+    let fullResponse = "";
+    
+    // Set up the polling loop
+    const pollInterval = setInterval(async () => {
+        try {
+            const pollRes = await fetch(`/get_story_chunk/${job_id}`);
+            const pollData = await pollRes.json();
+            
+            if (pollData.error) {
+                clearInterval(pollInterval);
+                displayMessage(`Polling error: ${pollData.error}`, 'error');
+                return;
+            }
+
+            const newText = pollData.text.substring(lastKnownLength);
+            if (newText.length > 0) {
+                document.getElementById("generated-story-output").value += newText;
+                fullResponse += newText;
+                lastKnownLength = pollData.text.length;
+            }
+
+            if (pollData.status === "complete" || pollData.status === "error") {
+                clearInterval(pollInterval); // Stop polling
+                if (pollData.status === "complete") {
+                    displayMessage("Story generation complete!", 'success');
+                } else {
+                    displayMessage("Story generation failed.", 'error');
+                }
+                
+                messageHistory.push({ role: "assistant", content: fullResponse });
+                updateChatHistoryUI();
+                setButtonState("generate", "📖 Generate Story");
+                setButtonState("record", "🎤 Record Voice");
+                setButtonState("read", "🔊 Read Story");
+            }
+
+        } catch (error) {
+            clearInterval(pollInterval);
+            console.error("Polling fetch error:", error);
+            displayMessage("Polling for story failed.", 'error');
+            setButtonState("generate", "📖 Generate Story");
+            setButtonState("record", "🎤 Record Voice");
+            setButtonState("read", "🔊 Read Story");
+        }
+    }, 2000); // Poll every 2 seconds
 };
 
 // --- New Copy Story Logic ---
