@@ -1,3 +1,19 @@
+
+let mediaRecorder;
+let audioChunks = [];
+let audioContext;
+
+// Global state for audio queue and playback
+let audioQueue = [];
+let isPlaying = false;
+let isPaused = false; 
+let audioSourceNodes = []; 
+let currentReader;
+
+// Client-side message history for chat endpoint
+let messageHistory = [];
+
+
 // --- Initialization: Clear all text fields on page load ---
 document.addEventListener("DOMContentLoaded", () => {
     // Clear all the text areas and input fields
@@ -24,19 +40,6 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-let mediaRecorder;
-let audioChunks = [];
-let audioContext;
-
-// Global state for audio queue and playback
-let audioQueue = [];
-let isPlaying = false;
-let isPaused = false; 
-let audioSourceNodes = []; 
-let currentReader;
-
-// Client-side message history for chat endpoint
-let messageHistory = [];
 // Helper function to update button states, text, and show a loading spinner
 function setButtonState(buttonId, text, isDisabled = false, showSpinner = false) {
     const button = document.getElementById(buttonId);
@@ -86,47 +89,33 @@ async function handleFetch(url, options, loadingMessage, successMessage, errorMe
 
 // Function to stop all audio playback and clean up
 function stopAudioPlayback() {
-    if (currentReader) {
-        currentReader.cancel().catch(e => console.error("Error canceling reader:", e));
-        currentReader = null;
+    if (audioContext && (isPlaying || isPaused)) {
+        audioContext.close().then(() => {
+            audioContext = null;
+            isPlaying = false;
+            isPaused = false;
+            setButtonState("read", "🔊 Read Story");
+        });
     }
-    
-    // Stop all currently playing audio source nodes
-    audioSourceNodes.forEach(source => {
-        try {
-            source.stop();
-            source.disconnect();
-        } catch (e) {}
-    });
-
-    audioSourceNodes = [];
-    audioQueue = [];
-    isPlaying = false;
-    isPaused = false;
-
-    setButtonState("read", "🔊 Read Story");
-    setButtonState("record", "🎤 Record Voice");
-    setButtonState("generate", "📖 Generate Story");
-    displayMessage("Playback stopped.", 'info');
 }
 
-// Function to pause audio playback
 function pauseAudioPlayback() {
-    if (audioContext && audioContext.state === 'running') {
-        audioContext.suspend();
-        isPaused = true;
-        setButtonState("read", "▶️ Resume Reading");
-        displayMessage("Playback paused.", 'info');
+    if (audioContext && isPlaying) {
+        audioContext.suspend().then(() => {
+            isPaused = true;
+            setButtonState("read", "▶️ Resume Reading");
+            displayMessage("Playback paused.", 'info');
+        });
     }
 }
 
-// Function to resume audio playback
 function resumeAudioPlayback() {
-    if (audioContext && audioContext.state === 'suspended') {
-        audioContext.resume();
-        isPaused = false;
-        setButtonState("read", "⏸️ Pause Reading", false, true);
-        displayMessage("Playback resumed.", 'info');
+    if (audioContext && isPaused) {
+        audioContext.resume().then(() => {
+            isPaused = false;
+            setButtonState("read", "⏹️ Stop Reading");
+            displayMessage("Playback resumed.", 'info');
+        });
     }
 }
 
@@ -159,14 +148,13 @@ function playNextChunk() {
     }
 }
 
-// --- The NEW and IMPROVED read button logic ---
 document.getElementById("read").onclick = async () => {
     // Case 1: Audio is currently playing, so pause it
     if (isPlaying && !isPaused) {
         pauseAudioPlayback();
         return;
     }
-    
+
     // Case 2: Audio is paused, so resume it
     if (isPlaying && isPaused) {
         resumeAudioPlayback();
@@ -178,117 +166,105 @@ document.getElementById("read").onclick = async () => {
         displayMessage("Please generate a story first!", 'error');
         return;
     }
-    
+
     // Case 3: Audio is not playing, so start a new playback session
-    setButtonState("read", "⏹️ Stop Reading", false, true); 
+    setButtonState("read", "⏹️ Stop Reading", false, true);
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("generate", "📖 Generate Story", true);
-    displayMessage("Fetching audio stream...", 'info');
-    
+    displayMessage("Processing text and fetching audio...", 'info');
+
     isPlaying = true;
+    isPaused = false;
 
-    try {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        
-        const res = await handleFetch("/tts_stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: storyText })
-        }, "Fetching audio stream...", "Playback started!", "Text-to-speech failed");
-        
-        if (res) {
-            currentReader = res.body.getReader(); 
-            let sourceSampleRate = null;
-            let leftover = new Uint8Array(0);
+    const paragraphs = storyText.split(/\r?\n\s*\r?\n/);
+    if (paragraphs.length === 0) {
+        displayMessage("No text to read.", 'error');
+        return;
+    }
 
-            while (true) {
-                const { done, value } = await currentReader.read();
-                if (!isPlaying || done) {
-                    if (done) currentReader = null;
-                    break;
-                }
-                if (isPaused) {
-                    // Pause the loop while the playback is paused
-                    await new Promise(resolve => {
-                        const checkPause = setInterval(() => {
-                            if (!isPaused) {
-                                clearInterval(checkPause);
-                                resolve();
-                            }
-                        }, 100);
-                    });
-                }
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // Clear the queue for a new session
+    audioQueue = [];
 
-                const data = new Uint8Array(leftover.length + value.length);
-                data.set(leftover, 0);
-                data.set(value, leftover.length);
+    const playNextAudio = () => {
+        if (audioQueue.length > 0) {
+            const audioBuffer = audioQueue.shift();
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
 
-                let offset = 0;
-                if (sourceSampleRate === null) {
-                    const newlineIndex = data.indexOf(10);
-                    if (newlineIndex !== -1) {
-                        const header = new TextDecoder().decode(data.slice(0, newlineIndex));
-                        if (header.startsWith("SR:")) {
-                            sourceSampleRate = parseInt(header.slice(3), 10);
-                        }
-                        offset = newlineIndex + 1;
-                    } else {
-                        leftover = data;
-                        continue;
-                    }
-                }
-                
-                const bytesAvailable = data.length - offset;
-                const alignedBytes = bytesAvailable - (bytesAvailable % 4);
-                if (alignedBytes > 0) {
-                    const aligned = data.slice(offset, offset + alignedBytes);
-                    const floatChunk = new Float32Array(aligned.buffer);
+            source.onended = () => {
+                playNextAudio();
+            };
 
-                    const audioBuffer = audioContext.createBuffer(1, floatChunk.length, sourceSampleRate);
-                    audioBuffer.getChannelData(0).set(floatChunk);
-                    audioQueue.push(audioBuffer);
-
-                    if (audioSourceNodes.length === 0 && !isPaused) {
-                        playNextChunk();
-                    }
-                }
-                leftover = data.slice(offset + alignedBytes);
+            source.start(0);
+        } else {
+            // Check if there are still paragraphs to fetch, or if we are done.
+            if (paragraphs.length === 0) {
+                isPlaying = false;
+                stopAudioPlayback();
             }
         }
-    } catch (error) {
-        console.error("TTS playback error:", error);
-        displayMessage("An error occurred during text-to-speech.", 'error');
-        stopAudioPlayback();
+    };
+
+    // A flag to ensure we only start playback once
+    let playbackStarted = false;
+
+    // Process each paragraph
+    for (let i = 0; i < paragraphs.length; i++) {
+        const paragraph = paragraphs[i];
+        if (paragraph.trim().length === 0) continue;
+
+        try {
+            const res = await fetch("/tts_stream", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: paragraph })
+            });
+            
+            if (!res.ok) {
+                throw new Error(`HTTP error! Status: ${res.status}`);
+            }
+
+            const audioBlob = await res.blob();
+            const arrayBuffer = await audioBlob.arrayBuffer();
+
+            const data = new Uint8Array(arrayBuffer);
+            const newlineIndex = data.indexOf(10);
+            const header = new TextDecoder().decode(data.slice(0, newlineIndex));
+            const sourceSampleRate = parseInt(header.slice(3), 10);
+            const audioData = data.slice(newlineIndex + 1);
+
+            const floatChunk = new Float32Array(audioData.buffer);
+            const audioBuffer = audioContext.createBuffer(1, floatChunk.length, sourceSampleRate);
+            audioBuffer.getChannelData(0).set(floatChunk);
+
+            audioQueue.push(audioBuffer);
+
+            // This is the key change: start playback if the queue has 3 items
+            // and we haven't started yet.
+            if (audioQueue.length >= 1 && !playbackStarted) {
+                playbackStarted = true;
+                playNextAudio();
+            }
+
+        } catch (error) {
+            console.error("TTS playback error:", error);
+            displayMessage("An error occurred during text-to-speech.", 'error');
+            stopAudioPlayback();
+            return;
+        }
+    }
+    
+    // Final check to start playback if the story is short (less than 3 paragraphs)
+    if (audioQueue.length > 0 && !playbackStarted) {
+        playbackStarted = true;
+        playNextAudio();
     }
 };
-
-// Add a function to stop and reset the audio playback state
-function stopAudioPlayback() {
-    isPlaying = false;
-    isPaused = false;
-    
-    // Stop and clear the queue of audio sources
-    audioQueue = []; 
-    audioSourceNodes.forEach(source => {
-        try {
-            source.stop();
-        } catch (e) {
-            // Ignore errors if the source is already stopped
-        }
-    });
-    audioSourceNodes = []; 
-    
-    // If a stream is in progress, cancel it
-    if (currentReader) {
-        currentReader.cancel("Playback stopped.");
-        currentReader = null;
-    }
-
-    setButtonState("read", "🔊 Read Story");
-    displayMessage("Audio playback stopped.", "info");
-}
 
 
 // --- Voice Recording and Transcription ---

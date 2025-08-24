@@ -1,7 +1,6 @@
 import numpy as np
 import tempfile
 import logging
-import ffmpeg
 import uuid
 import json
 import httpx
@@ -9,7 +8,7 @@ import os
 import re
 from datetime import datetime
 import asyncio
-from quart import Quart, request, Response, send_from_directory, jsonify
+from quart import Quart, request, Response, jsonify
 from kokoro_onnx import Kokoro
 from config import KOKORO_MODEL, KOKORO_VOICES, OLLAMA_URL, LLM_MODEL, VOICE
 
@@ -153,34 +152,30 @@ async def get_story_chunk(job_id):
 async def tts_stream():
     """
     Async low-latency TTS using kokoro-onnx.
-    Buffers the entire audio file before streaming to prevent client-side errors.
+    Streams raw little-endian float32 PCM. First bytes contain "SR:<rate>\\n".
     """
     if kokoro is None:
         return jsonify({"error": "Text-to-speech service is not available."}), 503
 
     try:
         data = await request.get_json()
-        text = (data or {}).get("text", "")
+        text = (data or {}).get("text", "").replace("*","")
         voice = (data or {}).get("voice", VOICE)
 
         if not text:
             return jsonify({"error": "Text cannot be empty."}), 400
 
-        # --- New implementation to buffer the full audio stream ---
-        full_audio_data = b""
-        async for samples, sr in kokoro.create_stream(text, voice=voice):
-            chunk = np.asarray(samples, dtype=np.float32).tobytes()
-            # Store the sample rate from the first chunk
-            if not full_audio_data:
-                full_audio_data += b"SR:" + str(sr).encode("ascii") + b"\n"
-            full_audio_data += chunk
+        async def pcm_stream():
+            first = True
+            async for samples, sr in kokoro.create_stream(text, voice=voice):
+                chunk = np.asarray(samples, dtype=np.float32).tobytes()
+                if first:
+                    yield b"SR:" + str(sr).encode("ascii") + b"\n" + chunk
+                    first = False
+                else:
+                    yield chunk
 
-        async def buffered_stream():
-            # Now, stream the complete audio data to the client
-            # This is a robust and reliable way to deliver the file
-            yield full_audio_data
-
-        return Response(buffered_stream(), content_type="application/octet-stream")
+        return Response(pcm_stream(), content_type="application/octet-stream")
     except Exception as e:
         print(f"TTS stream error: {e}")
         return jsonify({"error": "An error occurred during TTS streaming."}), 500
