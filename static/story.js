@@ -9,6 +9,7 @@ let isPlaying = false;
 let isPaused = false; 
 let audioSourceNodes = []; 
 let currentReader;
+let bufferedBytes = 0; // New variable to track total size
 
 // Client-side message history for chat endpoint
 let messageHistory = [];
@@ -167,16 +168,20 @@ document.getElementById("read").onclick = async () => {
         return;
     }
 
+
+
     // Case 3: Audio is not playing, so start a new playback session
     setButtonState("read", "⏹️ Stop Reading", false, true);
     setButtonState("record", "🎤 Record Voice", true);
     setButtonState("generate", "📖 Generate Story", true);
-    displayMessage("Processing text and fetching audio...", 'info');
+    displayMessage("Downloading initial audio chunks...", 'info');
 
+    bufferedBytes = 0;
     isPlaying = true;
     isPaused = false;
 
-    const paragraphs = storyText.split(/\r?\n\s*\r?\n/);
+    //const paragraphs = storyText.split(/\r?\n\s*\r?\n/);
+    const paragraphs = storyText.split(/[.,?!]/);
     if (paragraphs.length === 0) {
         displayMessage("No text to read.", 'error');
         return;
@@ -241,12 +246,14 @@ document.getElementById("read").onclick = async () => {
             const floatChunk = new Float32Array(audioData.buffer);
             const audioBuffer = audioContext.createBuffer(1, floatChunk.length, sourceSampleRate);
             audioBuffer.getChannelData(0).set(floatChunk);
+            bufferedBytes += audioData.length;
 
             audioQueue.push(audioBuffer);
 
-            // This is the key change: start playback if the queue has 3 items
-            // and we haven't started yet.
-            if (audioQueue.length >= 1 && !playbackStarted) {
+                        // Start playing only after the total buffered bytes is greater than 1MB
+            const MIN_BUFFER_SIZE_BYTES = 1000000; // 1 MB
+            if (bufferedBytes >= MIN_BUFFER_SIZE_BYTES && !playbackStarted) {
+                displayMessage("Reading Story...", 'info');
                 playbackStarted = true;
                 playNextAudio();
             }
@@ -259,8 +266,7 @@ document.getElementById("read").onclick = async () => {
         }
     }
     
-    // Final check to start playback if the story is short (less than 3 paragraphs)
-    if (audioQueue.length > 0 && !playbackStarted) {
+    if (bufferedBytes > 0 && !playbackStarted) {
         playbackStarted = true;
         playNextAudio();
     }
